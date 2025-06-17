@@ -1,0 +1,7 @@
+discord.py>=2.0.0
+aiohttp
+Pillow
+wikipedia
+imageio
+PyNaCl
+flask
