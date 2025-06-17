@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import random
 from io import BytesIO
 from PIL import Image
+from keep_alive import keep_alive 
 
 load_dotenv()  # Load your .env variables
 
@@ -262,7 +263,7 @@ class Fun(commands.Cog):
 
         except Exception as e:
             await ctx.send(f"❌ Error converting image: {e}")
-
+keep_alive()
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
