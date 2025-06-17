@@ -8,7 +8,6 @@ from io import BytesIO
 from PIL import Image
 from keep_alive import keep_alive 
 
-load_dotenv()  # Load your .env variables
 
 intents = discord.Intents.default()
 intents.message_content = True
