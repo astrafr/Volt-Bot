@@ -6,10 +6,8 @@ import asyncio
 import random
 from io import BytesIO
 from PIL import Image
-from dotenv import load_dotenv
 from keep_alive import keep_alive
 
-load_dotenv()
 
 intents = discord.Intents.default()
 intents.message_content = True
