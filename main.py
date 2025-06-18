@@ -6,24 +6,26 @@ import asyncio
 import random
 from io import BytesIO
 from PIL import Image
-from keep_alive import keep_alive 
+from dotenv import load_dotenv
+from keep_alive import keep_alive
 
+load_dotenv()
 
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix=",", intents=intents)
 
-# Moderation Cog
+# ---------------- MODERATION COG ---------------- #
 class Moderation(commands.Cog):
+    """Moderation Commands"""
     def __init__(self, bot):
         self.bot = bot
 
     async def log_action(self, ctx, action: str, target: Union[discord.Member, str], reason: str):
         channel = discord.utils.get(ctx.guild.text_channels, name="mod-logs")
         if not channel:
-            return  # Skip if log channel doesn't exist
-
+            return
         embed = discord.Embed(title="🛡️ Moderation Log", color=discord.Color.orange())
         embed.add_field(name="Action", value=action, inline=False)
         embed.add_field(name="Target", value=str(target), inline=False)
@@ -47,7 +49,6 @@ class Moderation(commands.Cog):
             name, discriminator = user.split("#")
         except ValueError:
             return await ctx.send("❌ Please use the format: username#discriminator")
-
         for ban_entry in banned_users:
             if (ban_entry.user.name, ban_entry.user.discriminator) == (name, discriminator):
                 await ctx.guild.unban(ban_entry.user)
@@ -119,8 +120,9 @@ class Moderation(commands.Cog):
         await ctx.send(message)
         await self.log_action(ctx, "Say Command", "Bot said a message", message)
 
-# Fun Cog
+# ---------------- FUN COG ---------------- #
 class Fun(commands.Cog):
+    """Fun Commands"""
     def __init__(self, bot):
         self.bot = bot
 
@@ -212,22 +214,15 @@ class Fun(commands.Cog):
     async def rps(self, ctx, choice: str):
         user = choice.lower()
         bot_choice = random.choice(["rock", "paper", "scissors"])
-        win = {
-            "rock": "scissors",
-            "paper": "rock",
-            "scissors": "paper"
-        }
-
+        win = {"rock": "scissors", "paper": "rock", "scissors": "paper"}
         if user not in win:
             return await ctx.send("Please choose rock, paper, or scissors.")
-
         if user == bot_choice:
             result = "It's a tie!"
         elif win[user] == bot_choice:
             result = "You win!"
         else:
             result = "I win!"
-
         await ctx.send(f"You chose **{user}**, I chose **{bot_choice}**. {result}")
 
     @commands.command()
@@ -244,36 +239,35 @@ class Fun(commands.Cog):
     async def to_gif(self, ctx):
         if not ctx.message.attachments:
             return await ctx.send("❌ Please attach an image to convert.")
-
         attachment = ctx.message.attachments[0]
         if not any(attachment.filename.lower().endswith(ext) for ext in ['png', 'jpg', 'jpeg', 'bmp']):
             return await ctx.send("❌ Unsupported file type. Please upload a PNG, JPG, or BMP image.")
-
         try:
             image_bytes = await attachment.read()
             image = Image.open(BytesIO(image_bytes))
-
             gif_bytes = BytesIO()
             image.save(gif_bytes, format="GIF")
             gif_bytes.seek(0)
-
             await ctx.send(file=discord.File(fp=gif_bytes, filename="converted.gif"))
-
         except Exception as e:
             await ctx.send(f"❌ Error converting image: {e}")
+
+# ---------------- EVENTS & MAIN ---------------- #
+
 keep_alive()
+
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
     print("Bot is ready!")
 
 async def main():
     async with bot:
-        bot.add_cog(Moderation(bot))  # Add moderation commands
-        bot.add_cog(Fun(bot))         # Add fun commands
+        await bot.add_cog(Moderation(bot))
+        await bot.add_cog(Fun(bot))
         token = os.getenv("DISCORD_TOKEN")
         if not token:
-            print("Error: DISCORD_TOKEN not found in .env")
+            print("❌ DISCORD_TOKEN not found in .env")
             return
         await bot.start(token)
 
