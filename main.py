@@ -8,15 +8,15 @@ from io import BytesIO
 from PIL import Image
 from keep_alive import keep_alive
 
-
 intents = discord.Intents.default()
 intents.message_content = True
+intents.guilds = True
+intents.members = True
 
 bot = commands.Bot(command_prefix=",", intents=intents)
 
 # ---------------- MODERATION COG ---------------- #
 class Moderation(commands.Cog):
-    """Moderation Commands"""
     def __init__(self, bot):
         self.bot = bot
 
@@ -120,7 +120,6 @@ class Moderation(commands.Cog):
 
 # ---------------- FUN COG ---------------- #
 class Fun(commands.Cog):
-    """Fun Commands"""
     def __init__(self, bot):
         self.bot = bot
 
@@ -250,6 +249,40 @@ class Fun(commands.Cog):
         except Exception as e:
             await ctx.send(f"❌ Error converting image: {e}")
 
+# ---------------- ACTIVITY WATCHER COG ---------------- #
+class ActivityWatcher(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.watch_data = {}  # {watcher_id: watched_user_id}
+
+    @commands.command()
+    async def watch(self, ctx, friend: discord.Member):
+        self.watch_data[ctx.author.id] = friend.id
+        await ctx.send(f"📡 Now watching {friend.display_name}. You’ll be DM’d when they talk.")
+
+    @commands.command()
+    async def unwatch(self, ctx):
+        if ctx.author.id in self.watch_data:
+            del self.watch_data[ctx.author.id]
+            await ctx.send("🛑 No longer watching anyone.")
+        else:
+            await ctx.send("❌ You're not watching anyone.")
+
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        if message.author.bot:
+            return
+        for watcher_id, watched_id in self.watch_data.items():
+            if message.author.id == watched_id:
+                watcher = self.bot.get_user(watcher_id)
+                if watcher:
+                    try:
+                        await watcher.send(
+                            f"👀 {message.author.display_name} just sent a message in #{message.channel.name} on **{message.guild.name}**."
+                        )
+                    except discord.Forbidden:
+                        print(f"Could not DM {watcher.name}")
+
 # ---------------- EVENTS & MAIN ---------------- #
 
 keep_alive()
@@ -263,6 +296,7 @@ async def main():
     async with bot:
         await bot.add_cog(Moderation(bot))
         await bot.add_cog(Fun(bot))
+        await bot.add_cog(ActivityWatcher(bot))
         token = os.getenv("DISCORD_TOKEN")
         if not token:
             print("❌ DISCORD_TOKEN not found in .env")
