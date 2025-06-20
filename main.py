@@ -282,6 +282,15 @@ class ActivityWatcher(commands.Cog):
                         )
                     except discord.Forbidden:
                         print(f"Could not DM {watcher.name}")
+                        
+    @commands.command()
+async def testdm(self, ctx):
+    try:
+        await ctx.author.send("✅ This is a test DM!")
+        await ctx.send("Sent you a DM!")
+    except:
+        await ctx.send("❌ I couldn't DM you. Check your settings.")
+
 
 # ---------------- EVENTS & MAIN ---------------- #
 
