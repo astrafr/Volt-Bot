@@ -40,7 +40,7 @@ class Moderation(commands.Cog):
         await self.log_action(ctx, "Ban", member, reason)
         
     @commands.command()
-    async def ping(self, ctx)
+    async def ping(self, ctx):
         latency = round(self.bot.lantency * 1000)
         await ctx.send(f'🏓 Pong! Latency: `{latency}ms`')
         
