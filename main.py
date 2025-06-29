@@ -56,7 +56,7 @@ class Moderation(commands.Cog):
         
     @commands.command()
     async def ping(self, ctx):
-        latency = round(self.bot.lantency * 1000)
+       latency = round(self.bot.latency * 1000)
         await ctx.send(f'🏓 Pong! Latency: `{latency}ms`')
         
     @commands.command()
@@ -363,7 +363,7 @@ class Fun(commands.Cog):
 class ActivityWatcher(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.watch_data = {1344770250125611132, 898859607391354891}  # {watcher_id: watched_user_id}
+        self.watch_data = {1344770250125611132}  # {watcher_id: watched_user_id}
 
     @commands.command()
     async def watch(self, ctx, friend: discord.Member):
