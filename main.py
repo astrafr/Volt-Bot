@@ -195,17 +195,12 @@ class Moderation(commands.Cog):
         await self.log_action(ctx, "Remove Warn", member, f"Removed warning #{index}: {removed}")
 
     @commands.command()
-    @commands.has_permissions(moderate_members=True)  # Permission to timeout/mute members
+    @commands.has_permissions(moderate_members=True)
     async def timeout(self, ctx, member: discord.Member, duration: int, *, reason="No reason provided"):
-        """
-        Timeout (mute) a member for `duration` minutes.
-        Usage: ,timeout @user 10 spamming
-        """
         try:
             until = discord.utils.utcnow() + timedelta(minutes=duration)
-            await member.timeout(until=until, reason=reason)
+            await member.timeout(until, reason=reason)  # positional arg here
             await ctx.send(f"⏲️ {member.mention} has been timed out for {duration} minutes.\nReason: {reason}")
-            await self.log_action(ctx, "Timeout", member, f"Duration: {duration} min | Reason: {reason}")
         except Exception as e:
             await ctx.send(f"❌ Could not timeout the member: {e}")
 
