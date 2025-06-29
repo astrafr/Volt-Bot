@@ -7,6 +7,8 @@ import random
 from io import BytesIO
 from PIL import Image
 from keep_alive import keep_alive
+import json
+from datetime import timedelta
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -14,6 +16,19 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix=",", intents=intents)
+
+WARN_FILE = "warnings.json"
+
+def load_warnings():
+    try:
+        with open(WARN_FILE, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_warnings(data):
+    with open(WARN_FILE, "w") as f:
+        json.dump(data, f, indent=4)
 
 # ---------------- MODERATION COG ---------------- #
 class Moderation(commands.Cog):
@@ -123,6 +138,96 @@ class Moderation(commands.Cog):
         await ctx.send(message)
         await self.log_action(ctx, "Say Command", "Bot said a message", message)
 
+    @commands.command()
+    @commands.has_permissions(manage_messages=True)
+    async def warn(self, ctx, member: discord.Member, *, reason="No reason provided"):
+        warnings = load_warnings()
+        guild_id = str(ctx.guild.id)
+        user_id = str(member.id)
+
+        warnings.setdefault(guild_id, {}).setdefault(user_id, []).append(reason)
+        save_warnings(warnings)
+
+        try:
+            await member.send(f"⚠️ You have been warned in **{ctx.guild.name}**.\n**Reason:** {reason}")
+        except discord.Forbidden:
+            await ctx.send("❌ Couldn't DM the user.")
+
+        await ctx.send(f"⚠️ Warned {member.mention} | Reason: {reason}")
+        await self.log_action(ctx, "Warn", member, reason)
+
+    @commands.command()
+    @commands.has_permissions(manage_messages=True)
+    async def warnings(self, ctx, member: discord.Member):
+        warnings = load_warnings()
+        user_warnings = warnings.get(str(ctx.guild.id), {}).get(str(member.id), [])
+
+        if not user_warnings:
+            return await ctx.send(f"✅ {member.display_name} has no warnings.")
+
+        warning_list = "\n".join([f"{i+1}. {r}" for i, r in enumerate(user_warnings)])
+        embed = discord.Embed(title=f"⚠️ Warnings for {member.display_name}", description=warning_list, color=discord.Color.orange())
+        await ctx.send(embed=embed)
+
+    @commands.command(aliases=["delwarn", "clearwarn"])
+    @commands.has_permissions(manage_messages=True)
+    async def removewarn(self, ctx, member: discord.Member, index: int = None):
+        warnings = load_warnings()
+        guild_id = str(ctx.guild.id)
+        user_id = str(member.id)
+
+        user_warnings = warnings.get(guild_id, {}).get(user_id, [])
+
+        if not user_warnings:
+            return await ctx.send("❌ That user has no warnings.")
+
+        if index is None or index < 1 or index > len(user_warnings):
+            return await ctx.send(f"❌ Provide a valid warning number between 1 and {len(user_warnings)}.")
+
+        removed = user_warnings.pop(index - 1)
+
+        # Clean up empty lists
+        if not user_warnings:
+            warnings[guild_id].pop(user_id)
+            if not warnings[guild_id]:
+                warnings.pop(guild_id)
+        else:
+            warnings[guild_id][user_id] = user_warnings
+
+        save_warnings(warnings)
+
+        await ctx.send(f"✅ Removed warning #{index} from {member.mention}.\n**Removed Reason:** {removed}")
+        await self.log_action(ctx, "Remove Warn", member, f"Removed warning #{index}: {removed}")
+
+    @commands.command()
+    @commands.has_permissions(moderate_members=True)  # Permission to timeout/mute members
+    async def timeout(self, ctx, member: discord.Member, duration: int, *, reason="No reason provided"):
+        """
+        Timeout (mute) a member for `duration` minutes.
+        Usage: ,timeout @user 10 spamming
+        """
+        try:
+            until = discord.utils.utcnow() + timedelta(minutes=duration)
+            await member.timeout(until=until, reason=reason)
+            await ctx.send(f"⏲️ {member.mention} has been timed out for {duration} minutes.\nReason: {reason}")
+            await self.log_action(ctx, "Timeout", member, f"Duration: {duration} min | Reason: {reason}")
+        except Exception as e:
+            await ctx.send(f"❌ Could not timeout the member: {e}")
+
+    @commands.command()
+    @commands.has_permissions(moderate_members=True)
+    async def untimeout(self, ctx, member: discord.Member, *, reason="No reason provided"):
+        """
+        Remove timeout from a member.
+        Usage: ,untimeout @user reason
+        """
+        try:
+            await member.remove_timeout(reason=reason)
+            await ctx.send(f"✅ {member.mention} has been un-timed out.\nReason: {reason}")
+            await self.log_action(ctx, "Untimeout", member, reason)
+        except Exception as e:
+            await ctx.send(f"❌ Could not remove timeout: {e}")
+            
 # ---------------- FUN COG ---------------- #
 class Fun(commands.Cog):
     def __init__(self, bot):
