@@ -53,12 +53,7 @@ class Moderation(commands.Cog):
         await member.ban(reason=reason)
         await ctx.send(f"🔨 Banned {member} | Reason: {reason}")
         await self.log_action(ctx, "Ban", member, reason)
-        
-    @commands.command()
-    async def ping(self, ctx):
-       latency = round(self.bot.latency * 1000)
-        await ctx.send(f'🏓 Pong! Latency: `{latency}ms`')
-        
+                
     @commands.command()
     @commands.has_permissions(ban_members=True)
     async def unban(self, ctx, *, user: str):
