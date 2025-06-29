@@ -422,5 +422,9 @@ async def main():
             return
         await bot.start(token)
 
+@bot.event
+async def on_command(ctx):
+    print(f"Command invoked: {ctx.command} by {ctx.author}")
+
 if __name__ == "__main__":
     asyncio.run(main())
