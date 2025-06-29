@@ -207,14 +207,9 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(moderate_members=True)
     async def untimeout(self, ctx, member: discord.Member, *, reason="No reason provided"):
-        """
-        Remove timeout from a member.
-        Usage: ,untimeout @user reason
-        """
         try:
-            await member.remove_timeout(reason=reason)
+            await member.timeout(None, reason=reason)  # Passing None removes the timeout
             await ctx.send(f"✅ {member.mention} has been un-timed out.\nReason: {reason}")
-            await self.log_action(ctx, "Untimeout", member, reason)
         except Exception as e:
             await ctx.send(f"❌ Could not remove timeout: {e}")
             
