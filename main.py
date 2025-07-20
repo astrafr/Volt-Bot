@@ -113,9 +113,23 @@ class Moderation(commands.Cog):
     @commands.command(aliases=['purge'])
     @commands.has_permissions(manage_messages=True)
     async def clear(self, ctx, amount: int = 5):
-        await ctx.channel.purge(limit=amount + 1)
-        await ctx.send(f"🧹 Cleared {amount} messages.", delete_after=3)
-        await self.log_action(ctx, "Clear Messages", f"{amount} messages", f"by {ctx.author}")
+        """Delete up to any number of messages by batching."""
+        if amount < 1:
+            return await ctx.send("❌ Please specify at least 1 message to delete.")
+
+        deleted = 0
+        while amount > 0:
+            to_delete = min(amount, 1000)  # Discord API limit
+            deleted_messages = await ctx.channel.purge(limit=to_delete)
+            deleted += len(deleted_messages)
+            amount -= len(deleted_messages)
+
+            # Stop if no more messages to delete
+            if len(deleted_messages) == 0:
+                break
+
+        await ctx.send(f"🧹 Cleared {deleted} messages.", delete_after=5)
+        await self.log_action(ctx, "Clear Messages", f"{deleted} messages", f"by {ctx.author}")
 
     @commands.command()
     @commands.has_permissions(manage_channels=True)
