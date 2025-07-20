@@ -18,6 +18,7 @@ intents.members = True
 bot = commands.Bot(command_prefix=",", intents=intents)
 
 WARN_FILE = "warnings.json"
+IP_BAN_FILE = "ip_bans.json"
 
 def load_warnings():
     try:
@@ -28,6 +29,17 @@ def load_warnings():
 
 def save_warnings(data):
     with open(WARN_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+def load_ip_bans():
+    try:
+        with open(IP_BAN_FILE, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_ip_bans(data):
+    with open(IP_BAN_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
 # ---------------- MODERATION COG ---------------- #
@@ -53,7 +65,7 @@ class Moderation(commands.Cog):
         await member.ban(reason=reason)
         await ctx.send(f"🔨 Banned {member} | Reason: {reason}")
         await self.log_action(ctx, "Ban", member, reason)
-                
+
     @commands.command()
     @commands.has_permissions(ban_members=True)
     async def unban(self, ctx, *, user: str):
@@ -181,7 +193,6 @@ class Moderation(commands.Cog):
 
         removed = user_warnings.pop(index - 1)
 
-        # Clean up empty lists
         if not user_warnings:
             warnings[guild_id].pop(user_id)
             if not warnings[guild_id]:
@@ -199,7 +210,7 @@ class Moderation(commands.Cog):
     async def timeout(self, ctx, member: discord.Member, duration: int, *, reason="No reason provided"):
         try:
             until = discord.utils.utcnow() + timedelta(minutes=duration)
-            await member.timeout(until, reason=reason)  # positional arg here
+            await member.timeout(until, reason=reason)
             await ctx.send(f"⏲️ {member.mention} has been timed out for {duration} minutes.\nReason: {reason}")
         except Exception as e:
             await ctx.send(f"❌ Could not timeout the member: {e}")
@@ -208,11 +219,48 @@ class Moderation(commands.Cog):
     @commands.has_permissions(moderate_members=True)
     async def untimeout(self, ctx, member: discord.Member, *, reason="No reason provided"):
         try:
-            await member.timeout(None, reason=reason)  # Passing None removes the timeout
+            await member.timeout(None, reason=reason)
             await ctx.send(f"✅ {member.mention} has been un-timed out.\nReason: {reason}")
         except Exception as e:
             await ctx.send(f"❌ Could not remove timeout: {e}")
-            
+
+    # ---- IP BAN COMMANDS ----
+    @commands.command()
+    @commands.has_permissions(ban_members=True)
+    async def ipban(self, ctx, member: discord.Member, ip: str, *, reason="No reason provided"):
+        ip_bans = load_ip_bans()
+        ip_bans[ip] = {
+            "user_id": member.id,
+            "reason": reason,
+            "moderator": ctx.author.id
+        }
+        save_ip_bans(ip_bans)
+
+        await member.ban(reason=f"IP Ban: {reason}")
+        await ctx.send(f"🚫 IP `{ip}` associated with {member} has been banned.\nReason: {reason}")
+        await self.log_action(ctx, "IP Ban", f"{member} (IP: {ip})", reason)
+
+    @commands.command()
+    @commands.has_permissions(ban_members=True)
+    async def unipban(self, ctx, ip: str):
+        ip_bans = load_ip_bans()
+        if ip in ip_bans:
+            removed = ip_bans.pop(ip)
+            save_ip_bans(ip_bans)
+            await ctx.send(f"✅ IP `{ip}` unbanned. Previously linked to user ID {removed['user_id']}.")
+            await self.log_action(ctx, "Un-IP Ban", ip, "Manual unban")
+        else:
+            await ctx.send("❌ That IP isn’t currently banned.")
+
+    @commands.command()
+    async def ipbans(self, ctx):
+        ip_bans = load_ip_bans()
+        if not ip_bans:
+            return await ctx.send("✅ No IPs are currently banned.")
+        ban_list = "\n".join([f"`{ip}` - User ID: {data['user_id']} (Reason: {data['reason']})" for ip, data in ip_bans.items()])
+        embed = discord.Embed(title="🚫 IP Ban List", description=ban_list, color=discord.Color.red())
+        await ctx.send(embed=embed)
+
 # ---------------- FUN COG ---------------- #
 class Fun(commands.Cog):
     def __init__(self, bot):
@@ -348,7 +396,7 @@ class Fun(commands.Cog):
 class ActivityWatcher(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.watch_data = {1344770250125611132}  # {watcher_id: watched_user_id}
+        self.watch_data = {}
 
     @commands.command()
     async def watch(self, ctx, friend: discord.Member):
@@ -377,7 +425,7 @@ class ActivityWatcher(commands.Cog):
                         )
                     except discord.Forbidden:
                         print(f"Could not DM {watcher.name}")
-                        
+
     @commands.command()
     async def testdm(self, ctx):
         try:
@@ -385,7 +433,6 @@ class ActivityWatcher(commands.Cog):
             await ctx.send("Sent you a DM!")
         except:
             await ctx.send("❌ I couldn't DM you. Check your settings.")
-
 
 # ---------------- EVENTS & MAIN ---------------- #
 
