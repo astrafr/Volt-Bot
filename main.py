@@ -110,25 +110,27 @@ class Moderation(commands.Cog):
         else:
             await ctx.send("❌ User is not muted.")
 
-    @commands.command(aliases=['purge'])
+        @commands.command(aliases=['purge'])
     @commands.has_permissions(manage_messages=True)
     async def clear(self, ctx, amount: int = 5):
-        """Delete up to any number of messages by batching."""
+        """Fast bulk delete any number of messages."""
         if amount < 1:
             return await ctx.send("❌ Please specify at least 1 message to delete.")
 
         deleted = 0
         while amount > 0:
-            to_delete = min(amount, 1000)  # Discord API limit
-            deleted_messages = await ctx.channel.purge(limit=to_delete)
-            deleted += len(deleted_messages)
-            amount -= len(deleted_messages)
+            to_delete = min(amount, 1000)  # Max batch size
+            batch = await ctx.channel.purge(limit=to_delete, bulk=True)
+            deleted += len(batch)
+            amount -= len(batch)
 
-            # Stop if no more messages to delete
-            if len(deleted_messages) == 0:
-                break
+            if len(batch) == 0:
+                break  # No more messages to delete
 
-        await ctx.send(f"🧹 Cleared {deleted} messages.", delete_after=5)
+        confirm = await ctx.send(f"🧹 Cleared {deleted} messages.")
+        await asyncio.sleep(2)
+        await confirm.delete()
+
         await self.log_action(ctx, "Clear Messages", f"{deleted} messages", f"by {ctx.author}")
 
     @commands.command()
