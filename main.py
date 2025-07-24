@@ -7,40 +7,51 @@ import random
 from io import BytesIO
 from PIL import Image
 import json
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 intents.members = True
+intents.presences = True  # For presence updates in ActivityWatcher
 
 bot = commands.Bot(command_prefix=",", intents=intents)
 
 WARN_FILE = "warnings.json"
 IP_BAN_FILE = "ip_bans.json"
+LEVELS_FILE = "levels.json"
+
+# ---------------- File helpers ---------------- #
+def load_json(filename):
+    try:
+        with open(filename, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_json(filename, data):
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=4)
 
 def load_warnings():
-    try:
-        with open(WARN_FILE, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    return load_json(WARN_FILE)
 
 def save_warnings(data):
-    with open(WARN_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    save_json(WARN_FILE, data)
 
 def load_ip_bans():
-    try:
-        with open(IP_BAN_FILE, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    return load_json(IP_BAN_FILE)
 
 def save_ip_bans(data):
-    with open(IP_BAN_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    save_json(IP_BAN_FILE, data)
 
+def load_levels():
+    return load_json(LEVELS_FILE)
+
+def save_levels(data):
+    save_json(LEVELS_FILE, data)
+
+# ---------------- Moderation Cog ---------------- #
 class Moderation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -256,6 +267,7 @@ class Moderation(commands.Cog):
         embed = discord.Embed(title="🚫 IP Ban List", description=ban_list, color=discord.Color.red())
         await ctx.send(embed=embed)
 
+# ---------------- Fun Cog ---------------- #
 class Fun(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -384,44 +396,33 @@ class Fun(commands.Cog):
             gif_bytes.seek(0)
             await ctx.send(file=discord.File(fp=gif_bytes, filename="converted.gif"))
         except Exception as e:
-            await ctx.send(f"❌ Error converting image: {e}")
+            await ctx.send(f"❌ Failed to convert image: {e}")
 
+# ---------------- ActivityWatcher Cog ---------------- #
 class ActivityWatcher(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.watch_data = {}
 
     @commands.command()
-    async def watch(self, ctx, friend: discord.Member):
-        self.watch_data[ctx.author.id] = friend.id
-        await ctx.send(f"📡 Now watching {friend.display_name}'s activities for {ctx.author.display_name}.")
+    async def watch(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        data = self.watch_data.get(str(member.id))
+        if not data:
+            return await ctx.send(f"⚠️ No watch data found for {member.display_name}.")
+        await ctx.send(f"👀 Watching {member.display_name}: {data}")
 
     @commands.command()
-    async def unwatch(self, ctx):
-        if ctx.author.id in self.watch_data:
-            del self.watch_data[ctx.author.id]
-            await ctx.send("❌ Stopped watching anyone.")
-        else:
-            await ctx.send("You weren't watching anyone.")
+    async def setwatch(self, ctx, *, info: str):
+        self.watch_data[str(ctx.author.id)] = info
+        await ctx.send(f"✅ Watch info set for {ctx.author.display_name}: {info}")
 
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):
-        for watcher_id, friend_id in self.watch_data.items():
-            if after.id == friend_id:
-                watcher = self.bot.get_user(watcher_id)
-                if watcher:
-                    # Send a DM to watcher about friend's activity change
-                    before_activities = {a.type: a.name for a in before.activities} if before else {}
-                    after_activities = {a.type: a.name for a in after.activities} if after else {}
-                    if before_activities != after_activities:
-                        msg = f"👀 Your friend **{after.display_name}** updated their activities:\n"
-                        msg += "\n".join(f"- {k.name}: {v}" for k, v in after_activities.items())
-                        try:
-                            await watcher.send(msg)
-                        except discord.Forbidden:
-                            pass
+        # Could update watch_data or trigger alerts here
+        pass
 
-# ---------------- CUSTOM VOICE CHANNELS COG ---------------- #
+# ---------------- CustomVC Cog ---------------- #
 class CustomVC(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -445,66 +446,147 @@ class CustomVC(commands.Cog):
                 await vc.delete()
                 self.temp_channels.pop(vc_id)
 
-
+# ---------------- Leveling Cog ---------------- #
 class Leveling(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.levels = {}  # {guild_id: {user_id: xp}}
+        self.levels = load_levels()
 
-    def add_xp(self, guild_id, user_id, amount=5):
-        self.levels.setdefault(str(guild_id), {}).setdefault(str(user_id), 0)
-        self.levels[str(guild_id)][str(user_id)] += amount
+    def get_xp(self, guild_id, user_id):
+        return self.levels.get(str(guild_id), {}).get(str(user_id), 0)
+
+    def set_xp(self, guild_id, user_id, xp):
+        self.levels.setdefault(str(guild_id), {})[str(user_id)] = xp
+        save_levels(self.levels)
+
+    def xp_to_level(self, xp):
+        return int((xp / 50) ** 0.5)
+
+    def level_to_xp(self, level):
+        return 50 * (level ** 2)
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        if message.author.bot:
+        if message.author.bot or message.guild is None:
             return
-        self.add_xp(message.guild.id, message.author.id)
-        # Optionally save to file here for persistence
+        guild_id = str(message.guild.id)
+        user_id = str(message.author.id)
+        current_xp = self.get_xp(guild_id, user_id)
+        current_level = self.xp_to_level(current_xp)
+        xp_gain = random.randint(5, 15)
+        new_xp = current_xp + xp_gain
+        new_level = self.xp_to_level(new_xp)
+        self.set_xp(guild_id, user_id, new_xp)
+        if new_level > current_level:
+            await message.channel.send(f"🎉 Congrats {message.author.mention}, you leveled up to level **{new_level}**!")
 
     @commands.command()
     async def level(self, ctx, member: discord.Member = None):
         member = member or ctx.author
-        xp = self.levels.get(str(ctx.guild.id), {}).get(str(member.id), 0)
-        level = int(xp ** 0.5)  # Example level calc
+        guild_id = str(ctx.guild.id)
+        user_id = str(member.id)
+        xp = self.get_xp(guild_id, user_id)
+        level = self.xp_to_level(xp)
         await ctx.send(f"⭐ {member.display_name} is level {level} with {xp} XP.")
 
+    @commands.command()
+    @commands.has_permissions(administrator=True)
+    async def addlevel(self, ctx, member: discord.Member, levels: int):
+        if levels < 1:
+            return await ctx.send("❌ Levels to add must be at least 1.")
+        guild_id = str(ctx.guild.id)
+        user_id = str(member.id)
+        current_xp = self.get_xp(guild_id, user_id)
+        current_level = self.xp_to_level(current_xp)
+        new_level = current_level + levels
+        new_xp = self.level_to_xp(new_level)
+        self.set_xp(guild_id, user_id, new_xp)
+        await ctx.send(f"✅ Added {levels} levels to {member.display_name}. Now level {new_level}.")
+
+    @commands.command()
+    @commands.has_permissions(administrator=True)
+    async def removelevel(self, ctx, member: discord.Member, levels: int):
+        if levels < 1:
+            return await ctx.send("❌ Levels to remove must be at least 1.")
+        guild_id = str(ctx.guild.id)
+        user_id = str(member.id)
+        current_xp = self.get_xp(guild_id, user_id)
+        current_level = self.xp_to_level(current_xp)
+        new_level = max(0, current_level - levels)
+        new_xp = self.level_to_xp(new_level)
+        self.set_xp(guild_id, user_id, new_xp)
+        await ctx.send(f"✅ Removed {levels} levels from {member.display_name}. Now level {new_level}.")
+
+    @commands.command()
+    async def leaderboard(self, ctx):
+        guild_id = str(ctx.guild.id)
+        if guild_id not in self.levels or not self.levels[guild_id]:
+            return await ctx.send("No leveling data available.")
+        sorted_users = sorted(self.levels[guild_id].items(), key=lambda x: x[1], reverse=True)
+        top = sorted_users[:10]
+        embed = discord.Embed(title="🏆 Level Leaderboard", color=discord.Color.gold())
+        for i, (user_id, xp) in enumerate(top, start=1):
+            member = ctx.guild.get_member(int(user_id))
+            name = member.display_name if member else f"User ID {user_id}"
+            level = self.xp_to_level(xp)
+            embed.add_field(name=f"#{i} - {name}", value=f"Level {level} ({xp} XP)", inline=False)
+        await ctx.send(embed=embed)
+
+# ---------------- Polls Cog ---------------- #
 class Polls(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     @commands.command()
     async def poll(self, ctx, *, question):
-        embed = discord.Embed(title="📊 Poll", description=question, color=discord.Color.blue())
-        message = await ctx.send(embed=embed)
+        message = await ctx.send(f"📊 **Poll:** {question}")
         await message.add_reaction("👍")
         await message.add_reaction("👎")
+        await ctx.send("✅ Poll created! React with 👍 or 👎.")
 
+# ---------------- VoiceChannels Cog ---------------- #
 class VoiceChannels(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # Placeholder for voice channel management commands
+    # Placeholder: add your voice channel related commands here
+    @commands.command()
+    async def join(self, ctx):
+        if ctx.author.voice:
+            channel = ctx.author.voice.channel
+            await channel.connect()
+            await ctx.send(f"Joined {channel.name}!")
+        else:
+            await ctx.send("You must be in a voice channel first!")
 
+    @commands.command()
+    async def leave(self, ctx):
+        if ctx.voice_client:
+            await ctx.voice_client.disconnect()
+            await ctx.send("Left the voice channel.")
+        else:
+            await ctx.send("I'm not in a voice channel!")
+
+# ---------------- AutoMod Cog ---------------- #
 class AutoMod(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        # Simple example: delete message if it contains banned words
-        banned_words = ["badword1", "badword2"]
+        if message.author.bot:
+            return
+        # Simple automod example: delete messages with banned words
+        banned_words = ["badword1", "badword2"]  # replace with your list
         if any(word in message.content.lower() for word in banned_words):
-            try:
-                await message.delete()
-                await message.channel.send(f"{message.author.mention}, your message contained a banned word.")
-            except discord.Forbidden:
-                pass
+            await message.delete()
+            await message.channel.send(f"⚠️ {message.author.mention}, that word is not allowed here!", delete_after=5)
 
 async def main():
     await bot.add_cog(Moderation(bot))
     await bot.add_cog(Fun(bot))
     await bot.add_cog(ActivityWatcher(bot))
+    await bot.add_cog(CustomVC(bot))
     await bot.add_cog(Leveling(bot))
     await bot.add_cog(Polls(bot))
     await bot.add_cog(VoiceChannels(bot))
