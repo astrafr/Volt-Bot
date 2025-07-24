@@ -6,40 +6,47 @@ import asyncio
 import random
 from io import BytesIO
 from PIL import Image
-from keep_alive import keep_alive
 import json
 from datetime import timedelta
+from discord.utils import get
 
+# --- Simple keep_alive webserver embedded ---
+from aiohttp import web
+
+async def handle(request):
+    return web.Response(text="Bot is alive!")
+
+def keep_alive():
+    app = web.Application()
+    app.add_routes([web.get('/', handle)])
+    runner = web.AppRunner(app)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(runner.setup())
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    loop.run_until_complete(site.start())
+
+# --- Bot setup ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 intents.members = True
 
-bot = commands.Bot(command_prefix=",", intents=intents)
+bot = commands.Bot(command_prefix=",", intents=intents, help_command=None)
 
+# --- Files for persistence ---
 WARN_FILE = "warnings.json"
 IP_BAN_FILE = "ip_bans.json"
+LEVELS_FILE = "levels.json"
 
-def load_warnings():
+def load_json(file):
     try:
-        with open(WARN_FILE, "r") as f:
+        with open(file, "r") as f:
             return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except:
         return {}
 
-def save_warnings(data):
-    with open(WARN_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-def load_ip_bans():
-    try:
-        with open(IP_BAN_FILE, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-def save_ip_bans(data):
-    with open(IP_BAN_FILE, "w") as f:
+def save_json(file, data):
+    with open(file, "w") as f:
         json.dump(data, f, indent=4)
 
 # ---------------- MODERATION COG ---------------- #
@@ -48,7 +55,7 @@ class Moderation(commands.Cog):
         self.bot = bot
 
     async def log_action(self, ctx, action: str, target: Union[discord.Member, str], reason: str):
-        channel = discord.utils.get(ctx.guild.text_channels, name="mod-logs")
+        channel = get(ctx.guild.text_channels, name="mod-logs")
         if not channel:
             return
         embed = discord.Embed(title="🛡️ Moderation Log", color=discord.Color.orange())
@@ -92,7 +99,7 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(manage_roles=True)
     async def mute(self, ctx, member: discord.Member, *, reason="No reason provided"):
-        role = discord.utils.get(ctx.guild.roles, name="Muted")
+        role = get(ctx.guild.roles, name="Muted")
         if not role:
             return await ctx.send("❌ No 'Muted' role found.")
         await member.add_roles(role)
@@ -102,7 +109,7 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(manage_roles=True)
     async def unmute(self, ctx, member: discord.Member):
-        role = discord.utils.get(ctx.guild.roles, name="Muted")
+        role = get(ctx.guild.roles, name="Muted")
         if role and role in member.roles:
             await member.remove_roles(role)
             await ctx.send(f"🔊 Unmuted {member}")
@@ -110,27 +117,22 @@ class Moderation(commands.Cog):
         else:
             await ctx.send("❌ User is not muted.")
 
-        @commands.command(aliases=['purge'])
+    @commands.command(aliases=['purge'])
     @commands.has_permissions(manage_messages=True)
     async def clear(self, ctx, amount: int = 5):
-        """Fast bulk delete any number of messages."""
         if amount < 1:
             return await ctx.send("❌ Please specify at least 1 message to delete.")
-
         deleted = 0
         while amount > 0:
-            to_delete = min(amount, 1000)  # Max batch size
+            to_delete = min(amount, 1000)
             batch = await ctx.channel.purge(limit=to_delete, bulk=True)
             deleted += len(batch)
             amount -= len(batch)
-
             if len(batch) == 0:
-                break  # No more messages to delete
-
+                break
         confirm = await ctx.send(f"🧹 Cleared {deleted} messages.")
         await asyncio.sleep(2)
         await confirm.delete()
-
         await self.log_action(ctx, "Clear Messages", f"{deleted} messages", f"by {ctx.author}")
 
     @commands.command()
@@ -164,30 +166,25 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(manage_messages=True)
     async def warn(self, ctx, member: discord.Member, *, reason="No reason provided"):
-        warnings = load_warnings()
+        warnings = load_json(WARN_FILE)
         guild_id = str(ctx.guild.id)
         user_id = str(member.id)
-
         warnings.setdefault(guild_id, {}).setdefault(user_id, []).append(reason)
-        save_warnings(warnings)
-
+        save_json(WARN_FILE, warnings)
         try:
             await member.send(f"⚠️ You have been warned in **{ctx.guild.name}**.\n**Reason:** {reason}")
         except discord.Forbidden:
             await ctx.send("❌ Couldn't DM the user.")
-
         await ctx.send(f"⚠️ Warned {member.mention} | Reason: {reason}")
         await self.log_action(ctx, "Warn", member, reason)
 
     @commands.command()
     @commands.has_permissions(manage_messages=True)
     async def warnings(self, ctx, member: discord.Member):
-        warnings = load_warnings()
+        warnings = load_json(WARN_FILE)
         user_warnings = warnings.get(str(ctx.guild.id), {}).get(str(member.id), [])
-
         if not user_warnings:
             return await ctx.send(f"✅ {member.display_name} has no warnings.")
-
         warning_list = "\n".join([f"{i+1}. {r}" for i, r in enumerate(user_warnings)])
         embed = discord.Embed(title=f"⚠️ Warnings for {member.display_name}", description=warning_list, color=discord.Color.orange())
         await ctx.send(embed=embed)
@@ -195,29 +192,22 @@ class Moderation(commands.Cog):
     @commands.command(aliases=["delwarn", "clearwarn"])
     @commands.has_permissions(manage_messages=True)
     async def removewarn(self, ctx, member: discord.Member, index: int = None):
-        warnings = load_warnings()
+        warnings = load_json(WARN_FILE)
         guild_id = str(ctx.guild.id)
         user_id = str(member.id)
-
         user_warnings = warnings.get(guild_id, {}).get(user_id, [])
-
         if not user_warnings:
             return await ctx.send("❌ That user has no warnings.")
-
         if index is None or index < 1 or index > len(user_warnings):
             return await ctx.send(f"❌ Provide a valid warning number between 1 and {len(user_warnings)}.")
-
         removed = user_warnings.pop(index - 1)
-
         if not user_warnings:
             warnings[guild_id].pop(user_id)
             if not warnings[guild_id]:
                 warnings.pop(guild_id)
         else:
             warnings[guild_id][user_id] = user_warnings
-
-        save_warnings(warnings)
-
+        save_json(WARN_FILE, warnings)
         await ctx.send(f"✅ Removed warning #{index} from {member.mention}.\n**Removed Reason:** {removed}")
         await self.log_action(ctx, "Remove Warn", member, f"Removed warning #{index}: {removed}")
 
@@ -240,18 +230,16 @@ class Moderation(commands.Cog):
         except Exception as e:
             await ctx.send(f"❌ Could not remove timeout: {e}")
 
-    # ---- IP BAN COMMANDS ----
     @commands.command()
     @commands.has_permissions(ban_members=True)
     async def ipban(self, ctx, member: discord.Member, ip: str, *, reason="No reason provided"):
-        ip_bans = load_ip_bans()
+        ip_bans = load_json(IP_BAN_FILE)
         ip_bans[ip] = {
             "user_id": member.id,
             "reason": reason,
             "moderator": ctx.author.id
         }
-        save_ip_bans(ip_bans)
-
+        save_json(IP_BAN_FILE, ip_bans)
         await member.ban(reason=f"IP Ban: {reason}")
         await ctx.send(f"🚫 IP `{ip}` associated with {member} has been banned.\nReason: {reason}")
         await self.log_action(ctx, "IP Ban", f"{member} (IP: {ip})", reason)
@@ -259,10 +247,10 @@ class Moderation(commands.Cog):
     @commands.command()
     @commands.has_permissions(ban_members=True)
     async def unipban(self, ctx, ip: str):
-        ip_bans = load_ip_bans()
+        ip_bans = load_json(IP_BAN_FILE)
         if ip in ip_bans:
             removed = ip_bans.pop(ip)
-            save_ip_bans(ip_bans)
+            save_json(IP_BAN_FILE, ip_bans)
             await ctx.send(f"✅ IP `{ip}` unbanned. Previously linked to user ID {removed['user_id']}.")
             await self.log_action(ctx, "Un-IP Ban", ip, "Manual unban")
         else:
@@ -270,7 +258,7 @@ class Moderation(commands.Cog):
 
     @commands.command()
     async def ipbans(self, ctx):
-        ip_bans = load_ip_bans()
+        ip_bans = load_json(IP_BAN_FILE)
         if not ip_bans:
             return await ctx.send("✅ No IPs are currently banned.")
         ban_list = "\n".join([f"`{ip}` - User ID: {data['user_id']} (Reason: {data['reason']})" for ip, data in ip_bans.items()])
@@ -450,29 +438,188 @@ class ActivityWatcher(commands.Cog):
         except:
             await ctx.send("❌ I couldn't DM you. Check your settings.")
 
-# ---------------- EVENTS & MAIN ---------------- #
+# ---------------- LEVELING SYSTEM ---------------- #
+class Leveling(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.levels = load_json(LEVELS_FILE)
 
-keep_alive()
+    def save(self):
+        save_json(LEVELS_FILE, self.levels)
 
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        if message.author.bot or not message.guild:
+            return
+        guild_id = str(message.guild.id)
+        user_id = str(message.author.id)
+        self.levels.setdefault(guild_id, {}).setdefault(user_id, {"xp":0, "level":1})
+        user_data = self.levels[guild_id][user_id]
+        user_data["xp"] += random.randint(5, 15)  # Random XP per message
+        xp_to_next = 5 * (user_data["level"] ** 2) + 50 * user_data["level"] + 100
+        if user_data["xp"] >= xp_to_next:
+            user_data["level"] += 1
+            await message.channel.send(f"🎉 {message.author.mention} leveled up to **{user_data['level']}**!")
+        self.save()
+
+    @commands.command()
+    async def level(self, ctx, member: discord.Member = None):
+        member = member or ctx.author
+        guild_id = str(ctx.guild.id)
+        user_id = str(member.id)
+        user_data = self.levels.get(guild_id, {}).get(user_id, {"xp":0, "level":1})
+        await ctx.send(f"📊 {member.display_name} is level **{user_data['level']}** with **{user_data['xp']} XP**.")
+
+    @commands.command()
+    async def leaderboard(self, ctx):
+        guild_id = str(ctx.guild.id)
+        if guild_id not in self.levels:
+            return await ctx.send("No leveling data for this server.")
+        leaderboard = sorted(self.levels[guild_id].items(), key=lambda x: x[1]["xp"], reverse=True)[:10]
+        embed = discord.Embed(title=f"🏆 Leaderboard for {ctx.guild.name}", color=discord.Color.gold())
+        for i, (user_id, data) in enumerate(leaderboard, start=1):
+            user = ctx.guild.get_member(int(user_id))
+            embed.add_field(name=f"{i}. {user.display_name if user else 'Unknown User'}", value=f"Level {data['level']} - {data['xp']} XP", inline=False)
+        await ctx.send(embed=embed)
+
+# ---------------- POLL COMMANDS ---------------- #
+class Polls(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @commands.command()
+    @commands.has_permissions(manage_messages=True)
+    async def poll(self, ctx, *, question_and_options):
+        # Example input: "Best color?; Red; Blue; Green"
+        parts = question_and_options.split(";")
+        if len(parts) < 2:
+            return await ctx.send("❌ Use: `,poll Question; Option1; Option2; ...`")
+        question = parts[0].strip()
+        options = [opt.strip() for opt in parts[1:] if opt.strip()]
+        if not (2 <= len(options) <= 10):
+            return await ctx.send("❌ Provide between 2 and 10 options.")
+        description = ""
+        reactions = []
+        emojis = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟']
+        for i, option in enumerate(options):
+            description += f"{emojis[i]} {option}\n"
+            reactions.append(emojis[i])
+        embed = discord.Embed(title=f"📊 {question}", description=description, color=discord.Color.blue())
+        poll_msg = await ctx.send(embed=embed)
+        for r in reactions:
+            await poll_msg.add_reaction(r)
+
+# ---------------- VOICE CHANNELS AUTO MANAGE ---------------- #
+class VoiceChannels(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.temp_voice_channels = {}  # {guild_id: {channel_id: creator_id}}
+
+    @commands.command()
+    async def createvc(self, ctx, *, name="Temporary Voice"):
+        """Create a temporary voice channel."""
+        overwrites = {
+            ctx.guild.default_role: discord.PermissionOverwrite(connect=True, view_channel=True),
+            ctx.author: discord.PermissionOverwrite(manage_channels=True)
+        }
+        channel = await ctx.guild.create_voice_channel(name, overwrites=overwrites)
+        self.temp_voice_channels.setdefault(str(ctx.guild.id), {})[str(channel.id)] = ctx.author.id
+        await ctx.send(f"✅ Created voice channel {channel.mention}")
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        if not before.channel and after.channel:
+            # Joined a channel
+            pass
+        elif before.channel and not after.channel:
+            # Left a channel, check if it's a temp vc and empty
+            guild_id = str(before.channel.guild.id)
+            channel_id = str(before.channel.id)
+            if guild_id in self.temp_voice_channels and channel_id in self.temp_voice_channels[guild_id]:
+                channel = before.channel
+                if len(channel.members) == 0:
+                    try:
+                        await channel.delete()
+                        self.temp_voice_channels[guild_id].pop(channel_id)
+                    except:
+                        pass
+
+# ---------------- AUTOMOD COG ---------------- #
+class AutoMod(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.bad_words = {"badword1", "badword2", "badword3"}
+        self.anti_link = True
+        self.spam_tracker = {}  # {user_id: [timestamps]}
+
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        if message.author.bot or not message.guild:
+            return
+        # Check bad words
+        if any(word in message.content.lower() for word in self.bad_words):
+            try:
+                await message.delete()
+                await message.channel.send(f"❌ {message.author.mention}, please do not use bad language.")
+            except:
+                pass
+        # Check links if anti_link enabled
+        if self.anti_link and "http" in message.content.lower():
+            try:
+                await message.delete()
+                await message.channel.send(f"❌ {message.author.mention}, links are not allowed.")
+            except:
+                pass
+        # Spam detection
+        user_id = message.author.id
+        now = discord.utils.utcnow().timestamp()
+        timestamps = self.spam_tracker.get(user_id, [])
+        timestamps = [t for t in timestamps if now - t < 5]  # keep last 5 seconds only
+        timestamps.append(now)
+        self.spam_tracker[user_id] = timestamps
+        if len(timestamps) > 5:
+            try:
+                await message.delete()
+                await message.channel.send(f"⚠️ {message.author.mention}, please stop spamming.")
+            except:
+                pass
+
+# ---------------- HELP COMMAND ---------------- #
+@bot.command()
+async def help(ctx):
+    embed = discord.Embed(title="Help Menu", color=discord.Color.green())
+    embed.add_field(name="Moderation", value="ban, unban, kick, mute, unmute, warn, warnings, removewarn, timeout, untimeout, clear, slowmode, lock, unlock, say", inline=False)
+    embed.add_field(name="Fun", value="joke, eightball, rizz, flip, roll, roast, compliment, saydumb, mathmeme, rate, hacker, rps, emoji, spamemoji, to_gif", inline=False)
+    embed.add_field(name="Activity", value="watch, unwatch, testdm", inline=False)
+    embed.add_field(name="Leveling", value="level, leaderboard", inline=False)
+    embed.add_field(name="Polls", value="poll", inline=False)
+    embed.add_field(name="Voice", value="createvc", inline=False)
+    await ctx.send(embed=embed)
+
+# --- Register cogs ---
+bot.add_cog(Moderation(bot))
+bot.add_cog(Fun(bot))
+bot.add_cog(ActivityWatcher(bot))
+bot.add_cog(Leveling(bot))
+bot.add_cog(Polls(bot))
+bot.add_cog(VoiceChannels(bot))
+bot.add_cog(AutoMod(bot))
+
+# --- Events ---
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
     print("Bot is ready!")
 
-async def main():
-    async with bot:
-        await bot.add_cog(Moderation(bot))
-        await bot.add_cog(Fun(bot))
-        await bot.add_cog(ActivityWatcher(bot))
-        token = os.getenv("DISCORD_TOKEN")
-        if not token:
-            print("❌ DISCORD_TOKEN not found in .env")
-            return
-        await bot.start(token)
-
 @bot.event
 async def on_command(ctx):
     print(f"Command invoked: {ctx.command} by {ctx.author}")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# --- Run keep_alive and start bot ---
+keep_alive()
+
+token = os.getenv("DISCORD_TOKEN")
+if not token:
+    print("❌ DISCORD_TOKEN not found in environment variables.")
+else:
+    bot.run(token)
