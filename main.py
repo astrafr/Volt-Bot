@@ -421,6 +421,31 @@ class ActivityWatcher(commands.Cog):
                         except discord.Forbidden:
                             pass
 
+# ---------------- CUSTOM VOICE CHANNELS COG ---------------- #
+class CustomVC(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.temp_channels = {}
+
+    @commands.command()
+    async def createvc(self, ctx, *, name="Private VC"):
+        category = discord.utils.get(ctx.guild.categories, name="Custom VCs")
+        if not category:
+            category = await ctx.guild.create_category("Custom VCs")
+        vc = await ctx.guild.create_voice_channel(name, category=category)
+        await vc.set_permissions(ctx.author, manage_channels=True)
+        self.temp_channels[vc.id] = ctx.author.id
+        await ctx.send(f"🎙️ Created custom voice channel: **{vc.name}**")
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        for vc_id, owner_id in list(self.temp_channels.items()):
+            vc = member.guild.get_channel(vc_id)
+            if vc and len(vc.members) == 0:
+                await vc.delete()
+                self.temp_channels.pop(vc_id)
+
+
 class Leveling(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
